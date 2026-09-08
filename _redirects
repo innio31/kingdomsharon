@@ -1,1 +1,2 @@
-/api/* https://acad.com.ng/ksps/api/:splat 200
+/api/* https://acad.com.ng/ksps/api/website-data.php 200
+/api/website-data.php https://acad.com.ng/ksps/api/website-data.php 200
