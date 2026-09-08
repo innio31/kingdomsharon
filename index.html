@@ -1,213 +1,1376 @@
-<?php
-// ksps/api/website-data.php - API endpoint for Netlify static site
-
-// ============================================
-// CORS HEADERS - MUST BE FIRST, BEFORE ANY OUTPUT
-// ============================================
-
-// Allow from your Netlify domain
-$allowed_origins = [
-    'https://kingdomsharon.acad.com.ng',
-    'https://www.kingdomsharon.acad.com.ng',
-    'https://kingdomsharon.netlify.app',
-    'https://www.kingdomsharon.netlify.app',
-    'http://localhost:3000', // For local development
-    'http://localhost:5173', // For local development
-];
-
-if (isset($_SERVER['HTTP_ORIGIN'])) {
-    if (in_array($_SERVER['HTTP_ORIGIN'], $allowed_origins)) {
-        header('Access-Control-Allow-Origin: ' . $_SERVER['HTTP_ORIGIN']);
-    } else {
-        // Allow any origin as fallback (for testing)
-        header('Access-Control-Allow-Origin: *');
-    }
-} else {
-    header('Access-Control-Allow-Origin: *');
-}
-
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
-header('Access-Control-Allow-Credentials: true');
-
-// Set JSON content type
-header('Content-Type: application/json; charset=utf-8');
-
-// Handle preflight OPTIONS request - EXIT IMMEDIATELY
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit(0);
-}
-
-// ============================================
-// DISABLE ERROR DISPLAY
-// ============================================
-error_reporting(0);
-ini_set('display_errors', 0);
-
-// ============================================
-// LOAD BOOTSTRAP
-// ============================================
-$bootstrap_path = $_SERVER['DOCUMENT_ROOT'] . '/core/bootstrap.php';
-
-if (!file_exists($bootstrap_path)) {
-    http_response_code(500);
-    echo json_encode(['error' => 'Bootstrap not found at: ' . $bootstrap_path]);
-    exit;
-}
-
-// Capture any output from bootstrap to prevent it from breaking JSON
-ob_start();
-require_once $bootstrap_path;
-ob_end_clean();
-
-// Now we have $pdo, SCHOOL_ID, SCHOOL_CODE, TENANT_PATH
-$school_id = SCHOOL_ID;
-
-// ============================================
-// HELPER: Get setting from website_settings table
-// ============================================
-function getWebsiteSettingAPI($pdo, $school_id, $key, $default = null) {
-    static $cache = [];
-    if (!isset($cache[$school_id])) {
-        $cache[$school_id] = [];
-        try {
-            $stmt = $pdo->prepare("SELECT setting_key, setting_value FROM website_settings WHERE school_id = ?");
-            $stmt->execute([$school_id]);
-            while ($row = $stmt->fetch()) {
-                $cache[$school_id][$row['setting_key']] = $row['setting_value'];
-            }
-        } catch (Exception $e) {
-            return $default;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Loading...</title>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    
+    <style>
+        /* ========================================
+           CSS VARIABLES (will be overridden by JS)
+           ======================================== */
+        :root {
+            --primary: #0057B8;
+            --secondary: #FFD700;
+            --accent: #198B3B;
+            --text: #1a1a2e;
+            --text-light: #6b7280;
+            --bg: #f8fafc;
+            --white: #ffffff;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            --radius: 12px;
+            --transition: all 0.3s ease;
         }
-    }
-    return $cache[$school_id][$key] ?? $default;
-}
 
-function getJsonSettingAPI($pdo, $school_id, $key, $default = []) {
-    $value = getWebsiteSettingAPI($pdo, $school_id, $key);
-    if ($value) {
-        $decoded = json_decode($value, true);
-        return is_array($decoded) ? $decoded : $default;
-    }
-    return $default;
-}
+        /* ========================================
+           RESET & BASE
+           ======================================== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-// ============================================
-// GET SCHOOL INFO FROM SCHOOLS TABLE
-// ============================================
-$stmt = $pdo->prepare("SELECT * FROM schools WHERE id = ?");
-$stmt->execute([$school_id]);
-$school = $stmt->fetch();
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
 
-if (!$school) {
-    http_response_code(404);
-    echo json_encode(['error' => 'School not found']);
-    exit;
-}
+        a {
+            text-decoration: none;
+            color: inherit;
+        }
 
-// ============================================
-// GET GALLERY DATA
-// ============================================
-$albums = [];
-try {
-    $stmt = $pdo->prepare("
-        SELECT a.*, 
-               (SELECT COUNT(*) FROM website_gallery_images WHERE album_id = a.id AND is_visible = 1) as image_count
-        FROM website_gallery_albums a
-        WHERE a.school_id = ? AND a.is_visible = 1
-        ORDER BY a.sort_order ASC, a.id ASC
-    ");
-    $stmt->execute([$school_id]);
-    $albums = $stmt->fetchAll();
-    
-    foreach ($albums as &$album) {
-        $stmt = $pdo->prepare("
-            SELECT id, image_path, image_title, image_description, sort_order
-            FROM website_gallery_images 
-            WHERE album_id = ? AND school_id = ? AND is_visible = 1
-            ORDER BY sort_order ASC, id ASC
-        ");
-        $stmt->execute([$album['id'], $school_id]);
-        $album['images'] = $stmt->fetchAll();
-    }
-} catch (Exception $e) {
-    $albums = [];
-}
+        img {
+            max-width: 100%;
+            display: block;
+        }
 
-// ============================================
-// GET PHONE NUMBERS AS ARRAY
-// ============================================
-$phone_numbers = [];
-if (!empty($school['contact_phone'])) {
-    $phone_numbers = array_map('trim', explode(',', $school['contact_phone']));
-    $phone_numbers = array_filter($phone_numbers);
-}
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
 
-// ============================================
-// GET LOGO PATH - Fix the default logo
-// ============================================
-$logo_path = $school['logo_path'] ?? '';
-// If logo_path is empty or just "/assets/logos/default.png", use tenant-specific path
-if (empty($logo_path) || $logo_path === '/assets/logos/default.png' || $logo_path === 'assets/logos/default.png') {
-    $logo_path = TENANT_PATH . 'assets/logos/logo.png';
-}
+        /* ========================================
+           LOADING SCREEN
+           ======================================== */
+        #loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: var(--white);
+        }
 
-// ============================================
-// BUILD RESPONSE
-// ============================================
-$response = [
-    // School info from schools table
-    'school_name' => $school['school_name'] ?? '',
-    'motto' => $school['motto'] ?? '',
-    'address' => $school['address'] ?? '',
-    'contact_email' => $school['contact_email'] ?? '',
-    'contact_phone' => $school['contact_phone'] ?? '',
-    'phone_numbers' => array_values($phone_numbers),
-    'whatsapp_number' => $school['whatsapp_number'] ?? '',
-    'year_founded' => $school['year_founded'] ?? '',
-    'logo_path' => $logo_path,
-    'primary_color' => $school['primary_color'] ?? '#722F37',
-    'secondary_color' => $school['secondary_color'] ?? '#d4af7a',
-    'accent_color' => $school['accent_color'] ?? '#ffffff',
-    'portal_url' => TENANT_PATH . 'login.php',
-    'tenant_path' => TENANT_PATH,
-    'school_code' => SCHOOL_CODE,
-    
-    // Website settings
-    'mission' => getWebsiteSettingAPI($pdo, $school_id, 'mission', ''),
-    'vision' => getWebsiteSettingAPI($pdo, $school_id, 'vision', ''),
-    'core_values' => getJsonSettingAPI($pdo, $school_id, 'core_values', []),
-    'leadership_team' => getJsonSettingAPI($pdo, $school_id, 'leadership_team', []),
-    'levels_offered' => getJsonSettingAPI($pdo, $school_id, 'levels_offered', []),
-    'milestones' => getJsonSettingAPI($pdo, $school_id, 'milestones', []),
-    'achievements' => getJsonSettingAPI($pdo, $school_id, 'achievements', []),
-    'extracurricular' => getJsonSettingAPI($pdo, $school_id, 'extracurricular', []),
-    'why_choose_us' => getJsonSettingAPI($pdo, $school_id, 'why_choose_us', []),
-    
-    // Social links
-    'social' => [
-        'facebook' => getWebsiteSettingAPI($pdo, $school_id, 'social_facebook', ''),
-        'instagram' => getWebsiteSettingAPI($pdo, $school_id, 'social_instagram', ''),
-        'whatsapp' => getWebsiteSettingAPI($pdo, $school_id, 'social_whatsapp', ''),
-        'twitter' => getWebsiteSettingAPI($pdo, $school_id, 'social_twitter', ''),
-        'youtube' => getWebsiteSettingAPI($pdo, $school_id, 'social_youtube', ''),
-    ],
-    
-    // Gallery
-    'gallery_albums' => $albums,
-    
-    // Meta
-    'updated_at' => date('Y-m-d H:i:s'),
-    'status' => 'success'
-];
+        #loading .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #e5e7eb;
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
 
-// ============================================
-// CACHE CONTROL
-// ============================================
-header('Cache-Control: public, max-age=300');
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
 
-// ============================================
-// OUTPUT JSON
-// ============================================
-echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        #loading p {
+            margin-top: 16px;
+            color: var(--text-light);
+            font-size: 0.9rem;
+        }
+
+        /* Hide content until loaded */
+        #content {
+            display: none;
+        }
+
+        #content.visible {
+            display: block;
+        }
+
+        /* ========================================
+           NAVIGATION
+           ======================================== */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+            padding: 14px 0;
+            transition: var(--transition);
+        }
+
+        .navbar .container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .navbar .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: var(--primary);
+        }
+
+        .navbar .brand img {
+            height: 36px;
+            width: 36px;
+            border-radius: 8px;
+            object-fit: cover;
+        }
+
+        .navbar .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 28px;
+            list-style: none;
+        }
+
+        .navbar .nav-links a {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text);
+            transition: var(--transition);
+            position: relative;
+        }
+
+        .navbar .nav-links a:hover,
+        .navbar .nav-links a.active {
+            color: var(--primary);
+        }
+
+        .navbar .nav-links a.active::after {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+
+        .navbar .portal-btn {
+            background: var(--primary);
+            color: #fff;
+            padding: 8px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            transition: var(--transition);
+            border: none;
+            cursor: pointer;
+        }
+
+        .navbar .portal-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        /* Mobile menu */
+        .navbar .hamburger {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 1.4rem;
+            cursor: pointer;
+            color: var(--text);
+        }
+
+        @media (max-width: 768px) {
+            .navbar .nav-links {
+                display: none;
+                width: 100%;
+                flex-direction: column;
+                gap: 12px;
+                padding: 16px 0 8px;
+                border-top: 1px solid #e5e7eb;
+            }
+
+            .navbar .nav-links.open {
+                display: flex;
+            }
+
+            .navbar .hamburger {
+                display: block;
+            }
+
+            .navbar .portal-btn {
+                margin-left: auto;
+            }
+        }
+
+        /* ========================================
+           HERO
+           ======================================== */
+        .hero {
+            padding: 120px 0 60px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: #fff;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 80px;
+            background: var(--bg);
+            clip-path: ellipse(70% 100% at 50% 100%);
+        }
+
+        .hero .container {
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero .badge {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 6px 18px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+        }
+
+        .hero h1 {
+            font-size: 3rem;
+            font-weight: 900;
+            line-height: 1.15;
+            margin-bottom: 16px;
+        }
+
+        .hero h1 .highlight {
+            color: var(--secondary);
+        }
+
+        .hero p {
+            font-size: 1.15rem;
+            opacity: 0.9;
+            max-width: 600px;
+            margin: 0 auto 28px;
+        }
+
+        .hero .btn-group {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .hero .btn-primary {
+            background: #fff;
+            color: var(--primary);
+            padding: 12px 32px;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+
+        .hero .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+        }
+
+        .hero .btn-secondary {
+            background: transparent;
+            color: #fff;
+            padding: 12px 32px;
+            border-radius: 8px;
+            font-weight: 600;
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            transition: var(--transition);
+        }
+
+        .hero .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: #fff;
+        }
+
+        @media (max-width: 768px) {
+            .hero {
+                padding: 100px 0 40px;
+            }
+
+            .hero h1 {
+                font-size: 2rem;
+            }
+
+            .hero p {
+                font-size: 1rem;
+            }
+        }
+
+        /* ========================================
+           SECTION COMMON
+           ======================================== */
+        .section {
+            padding: 60px 0;
+        }
+
+        .section-label {
+            display: inline-block;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--primary);
+            background: rgba(0, 87, 184, 0.08);
+            padding: 4px 14px;
+            border-radius: 20px;
+            margin-bottom: 12px;
+        }
+
+        .section-title {
+            font-size: 2.2rem;
+            font-weight: 800;
+            margin-bottom: 12px;
+        }
+
+        .section-title .highlight {
+            color: var(--primary);
+        }
+
+        .section-subtitle {
+            font-size: 1rem;
+            color: var(--text-light);
+            max-width: 600px;
+            margin-bottom: 40px;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .text-center .section-subtitle {
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* ========================================
+           STATS
+           ======================================== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 24px;
+            margin-top: 20px;
+        }
+
+        .stat-item {
+            text-align: center;
+            background: var(--white);
+            padding: 28px 20px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .stat-item .number {
+            font-size: 2.4rem;
+            font-weight: 800;
+            color: var(--primary);
+        }
+
+        .stat-item .label {
+            font-size: 0.85rem;
+            color: var(--text-light);
+            margin-top: 4px;
+        }
+
+        /* ========================================
+           MISSION / VISION / VALUES
+           ======================================== */
+        .mv-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 32px;
+            margin-bottom: 32px;
+        }
+
+        .mv-card {
+            background: var(--white);
+            padding: 32px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .mv-card .icon {
+            font-size: 2rem;
+            color: var(--primary);
+            margin-bottom: 12px;
+        }
+
+        .mv-card h3 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .mv-card p {
+            color: var(--text-light);
+            font-size: 0.9rem;
+        }
+
+        .values-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .value-tag {
+            background: var(--white);
+            padding: 12px 20px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 0.85rem;
+            box-shadow: var(--shadow);
+            border-left: 4px solid var(--primary);
+        }
+
+        @media (max-width: 768px) {
+            .mv-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ========================================
+           LEADERSHIP
+           ======================================== */
+        .leadership-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 24px;
+        }
+
+        .leader-card {
+            background: var(--white);
+            padding: 24px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            text-align: center;
+        }
+
+        .leader-card .avatar {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            font-weight: 700;
+            margin: 0 auto 12px;
+        }
+
+        .leader-card h4 {
+            font-size: 1rem;
+            font-weight: 700;
+        }
+
+        .leader-card .title {
+            font-size: 0.8rem;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .leader-card .bio {
+            font-size: 0.82rem;
+            color: var(--text-light);
+            margin-top: 8px;
+        }
+
+        /* ========================================
+           LEVELS / PROGRAMMES
+           ======================================== */
+        .levels-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+        }
+
+        .level-card {
+            background: var(--white);
+            padding: 20px 24px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            border-left: 4px solid var(--primary);
+        }
+
+        .level-card h4 {
+            font-size: 0.95rem;
+            font-weight: 700;
+        }
+
+        .level-card p {
+            font-size: 0.8rem;
+            color: var(--text-light);
+        }
+
+        /* ========================================
+           EXTRACURRICULAR
+           ======================================== */
+        .extra-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .extra-card {
+            background: var(--white);
+            padding: 20px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            text-align: center;
+        }
+
+        .extra-card .emoji {
+            font-size: 2.4rem;
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .extra-card h4 {
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+
+        .extra-card p {
+            font-size: 0.78rem;
+            color: var(--text-light);
+        }
+
+        /* ========================================
+           WHY CHOOSE US
+           ======================================== */
+        .why-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+        }
+
+        .why-card {
+            background: var(--white);
+            padding: 24px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .why-card .icon {
+            font-size: 1.6rem;
+            color: var(--primary);
+            margin-bottom: 8px;
+        }
+
+        .why-card h4 {
+            font-size: 0.95rem;
+            font-weight: 700;
+        }
+
+        .why-card p {
+            font-size: 0.82rem;
+            color: var(--text-light);
+        }
+
+        /* ========================================
+           ACHIEVEMENTS
+           ======================================== */
+        .achievements-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+
+        .achievement-item {
+            background: var(--white);
+            padding: 14px 20px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.85rem;
+        }
+
+        .achievement-item i {
+            color: var(--secondary);
+            font-size: 1.2rem;
+        }
+
+        /* ========================================
+           MILESTONES
+           ======================================== */
+        .milestones-timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            position: relative;
+            padding-left: 28px;
+            border-left: 3px solid var(--primary);
+        }
+
+        .milestone-item {
+            background: var(--white);
+            padding: 16px 20px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .milestone-item .year {
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 0.85rem;
+        }
+
+        .milestone-item .event {
+            font-size: 0.85rem;
+        }
+
+        /* ========================================
+           SOCIAL LINKS
+           ======================================== */
+        .social-links {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+
+        .social-links a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: var(--white);
+            color: var(--text);
+            font-size: 1.1rem;
+            box-shadow: var(--shadow);
+            transition: var(--transition);
+        }
+
+        .social-links a:hover {
+            background: var(--primary);
+            color: #fff;
+            transform: translateY(-3px);
+        }
+
+        /* ========================================
+           FOOTER
+           ======================================== */
+        .footer {
+            background: var(--text);
+            color: #fff;
+            padding: 40px 0 24px;
+        }
+
+        .footer .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .footer .brand {
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+
+        .footer p {
+            font-size: 0.8rem;
+            opacity: 0.7;
+        }
+
+        .footer .footer-links {
+            display: flex;
+            gap: 20px;
+            list-style: none;
+        }
+
+        .footer .footer-links a {
+            font-size: 0.8rem;
+            opacity: 0.7;
+            transition: var(--transition);
+        }
+
+        .footer .footer-links a:hover {
+            opacity: 1;
+        }
+
+        @media (max-width: 768px) {
+            .footer .container {
+                flex-direction: column;
+                text-align: center;
+            }
+        }
+
+        /* ========================================
+           ERROR STATE
+           ======================================== */
+        #error {
+            display: none;
+            text-align: center;
+            padding: 80px 20px;
+        }
+
+        #error.visible {
+            display: block;
+        }
+
+        #error i {
+            font-size: 3rem;
+            color: #ef4444;
+            margin-bottom: 16px;
+        }
+
+        #error h2 {
+            font-size: 1.4rem;
+            margin-bottom: 8px;
+        }
+
+        #error p {
+            color: var(--text-light);
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ========================================
+    LOADING SCREEN
+    ======================================== -->
+    <div id="loading">
+        <div class="spinner"></div>
+        <p>Loading school website...</p>
+    </div>
+
+    <!-- ========================================
+    ERROR STATE
+    ======================================== -->
+    <div id="error">
+        <i class="fas fa-exclamation-circle"></i>
+        <h2>Unable to load website content</h2>
+        <p>Please check your connection and try again.</p>
+        <button onclick="location.reload()" style="margin-top:16px;padding:10px 24px;background:var(--primary);color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit;">
+            <i class="fas fa-sync"></i> Retry
+        </button>
+    </div>
+
+    <!-- ========================================
+    MAIN CONTENT
+    ======================================== -->
+    <div id="content">
+
+        <!-- ============================
+        NAVIGATION
+        ============================ -->
+        <nav class="navbar" id="navbar">
+            <div class="container">
+                <a href="#" class="brand" id="brandLink">
+                    <img id="navLogo" src="" alt="Logo" />
+                    <span id="navSchoolName">School</span>
+                </a>
+
+                <button class="hamburger" id="hamburger" aria-label="Menu">
+                    <i class="fas fa-bars"></i>
+                </button>
+
+                <ul class="nav-links" id="navLinks">
+                    <li><a href="/" class="active">Home</a></li>
+                    <li><a href="/about">About</a></li>
+                    <li><a href="/admissions">Admissions</a></li>
+                    <li><a href="/gallery">Gallery</a></li>
+                </ul>
+
+                <a href="#" id="portalBtn" class="portal-btn">
+                    <i class="fas fa-sign-in-alt"></i> Portal
+                </a>
+            </div>
+        </nav>
+
+        <!-- ============================
+        HERO
+        ============================ -->
+        <section class="hero" id="heroSection">
+            <div class="container">
+                <span class="badge" id="heroBadge">Welcome to</span>
+                <h1 id="heroHeadline">Where Every<br />Child is a <span class="highlight">Genius</span></h1>
+                <p id="heroSubtext">A place where young minds are nurtured, talents are discovered, and children are prepared for a future of excellence.</p>
+                <div class="btn-group">
+                    <a href="/admissions" class="btn-primary" id="heroBtnPrimary">Apply for Admission</a>
+                    <a href="/about" class="btn-secondary" id="heroBtnSecondary">Learn More</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================
+        STATS
+        ============================ -->
+        <section class="section" id="statsSection">
+            <div class="container">
+                <div class="stats-grid" id="statsGrid">
+                    <!-- Rendered by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================
+        MISSION, VISION, VALUES
+        ============================ -->
+        <section class="section" id="mvSection">
+            <div class="container">
+                <div class="mv-grid" id="mvGrid">
+                    <!-- Rendered by JS -->
+                </div>
+                <div id="valuesContainer">
+                    <!-- Rendered by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================
+        WHY CHOOSE US
+        ============================ -->
+        <section class="section" id="whySection">
+            <div class="container text-center">
+                <span class="section-label" id="whyLabel">Why Choose Us</span>
+                <h2 class="section-title" id="whyHeading">We Bring Out the <span class="highlight">Best</span> in Every Child</h2>
+                <p class="section-subtitle" id="whySubheading">Our commitment to excellence sets us apart.</p>
+                <div class="why-grid" id="whyGrid">
+                    <!-- Rendered by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================
+        LEVELS / PROGRAMMES
+        ============================ -->
+        <section class="section" id="levelsSection">
+            <div class="container text-center">
+                <span class="section-label" id="levelsLabel">Our Programmes</span>
+                <h2 class="section-title" id="levelsHeading">From Creche to Primary — A Journey of <span class="highlight">Discovery</span></h2>
+                <p class="section-subtitle" id="levelsSubheading">Every stage of your child's development is carefully nurtured.</p>
+                <div class="levels-grid" id="levelsGrid">
+                    <!-- Rendered by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================
+        EXTRACURRICULAR
+        ============================ -->
+        <section class="section" id="extraSection">
+            <div class="container text-center">
+                <span class="section-label" id="extraLabel">Beyond the Classroom</span>
+                <h2 class="section-title" id="extraHeading">Extracurricular <span class="highlight">Programmes</span></h2>
+                <p class="section-subtitle" id="extraSubheading">Developing well-rounded children through diverse activities.</p>
+                <div class="extra-grid" id="extraGrid">
+                    <!-- Rendered by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================
+        ACHIEVEMENTS
+        ============================ -->
+        <section class="section" id="achievementsSection">
+            <div class="container text-center">
+                <span class="section-label">Achievements</span>
+                <h2 class="section-title">Our <span class="highlight">Awards &amp; Recognition</span></h2>
+                <p class="section-subtitle">Celebrating excellence in education.</p>
+                <div class="achievements-list" id="achievementsList">
+                    <!-- Rendered by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================
+        MILESTONES
+        ============================ -->
+        <section class="section" id="milestonesSection">
+            <div class="container text-center">
+                <span class="section-label">Our History</span>
+                <h2 class="section-title">Key <span class="highlight">Milestones</span></h2>
+                <p class="section-subtitle">The journey of our school so far.</p>
+                <div class="milestones-timeline" id="milestonesTimeline" style="max-width:600px;margin:0 auto;">
+                    <!-- Rendered by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================
+        CALL TO ACTION
+        ============================ -->
+        <section class="section" style="background:var(--primary);color:#fff;padding:60px 0;text-align:center;">
+            <div class="container">
+                <h2 style="font-size:2rem;font-weight:800;margin-bottom:12px;" id="ctaHeading">Ready to Enrol Your Child?</h2>
+                <p style="opacity:0.9;max-width:500px;margin:0 auto 24px;" id="ctaBody">Give your child the gift of a strong foundation. Join our community today.</p>
+                <a href="/admissions" class="btn-primary" style="background:#fff;color:var(--primary);padding:14px 36px;border-radius:8px;font-weight:700;display:inline-block;" id="ctaBtn">Apply for Admission</a>
+            </div>
+        </section>
+
+        <!-- ============================
+        SOCIAL LINKS
+        ============================ -->
+        <section class="section" style="padding:40px 0;">
+            <div class="container text-center">
+                <h3 style="font-size:1rem;font-weight:600;margin-bottom:12px;" id="socialLabel">Follow us on social media</h3>
+                <div class="social-links" id="socialLinks">
+                    <!-- Rendered by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================
+        FOOTER
+        ============================ -->
+        <footer class="footer">
+            <div class="container">
+                <div>
+                    <div class="brand" id="footerBrand">School Name</div>
+                    <p id="footerAddress">Address</p>
+                </div>
+                <ul class="footer-links">
+                    <li><a href="/">Home</a></li>
+                    <li><a href="/about">About</a></li>
+                    <li><a href="/admissions">Admissions</a></li>
+                    <li><a href="/gallery">Gallery</a></li>
+                </ul>
+                <p id="footerCopyright">&copy; 2025 All rights reserved.</p>
+            </div>
+        </footer>
+
+    </div>
+
+    <!-- ========================================
+    JAVASCRIPT
+    ======================================== -->
+    <script>
+        // ============================================
+        // API URL - Change this to your school's API
+        // ============================================
+        const API_URL = '/api/website-data.php';
+
+        // ============================================
+        // FETCH DATA
+        // ============================================
+        async function loadWebsiteData() {
+            try {
+                const response = await fetch(API_URL);
+
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+
+                const data = await response.json();
+
+                // Check if there's an error from the API
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                return data;
+            } catch (error) {
+                console.error('Error loading website data:', error);
+                throw error;
+            }
+        }
+
+        // ============================================
+        // RENDER FUNCTIONS
+        // ============================================
+
+        // --- NAVIGATION ---
+        function renderNav(data) {
+            // Logo
+            const logo = document.getElementById('navLogo');
+            if (data.logo_path) {
+                logo.src = data.logo_path;
+                logo.alt = data.school_name + ' logo';
+            } else {
+                logo.style.display = 'none';
+            }
+
+            // School name
+            document.getElementById('navSchoolName').textContent = data.school_name;
+
+            // Portal button
+            const portalBtn = document.getElementById('portalBtn');
+            if (data.portal_url) {
+                portalBtn.href = data.portal_url;
+            } else if (data.tenant_path) {
+                portalBtn.href = data.tenant_path;
+            }
+
+            // Brand link
+            document.getElementById('brandLink').href = '/';
+
+            // Mobile hamburger
+            document.getElementById('hamburger').addEventListener('click', function() {
+                document.getElementById('navLinks').classList.toggle('open');
+            });
+        }
+
+        // --- HERO ---
+        function renderHero(data) {
+            document.getElementById('heroBadge').textContent = 'Welcome to ' + data.school_name;
+
+            // Use motto if available, or default headline
+            if (data.motto) {
+                document.getElementById('heroHeadline').innerHTML = data.motto;
+            }
+
+            // Use address or a default subtext
+            if (data.address) {
+                document.getElementById('heroSubtext').textContent = data.address;
+            }
+
+            // Buttons - use school contact if available
+            const btnPrimary = document.getElementById('heroBtnPrimary');
+            const btnSecondary = document.getElementById('heroBtnSecondary');
+
+            btnPrimary.textContent = 'Apply for Admission';
+            btnPrimary.href = '/admissions';
+
+            btnSecondary.textContent = 'Learn More';
+            btnSecondary.href = '/about';
+        }
+
+        // --- STATS ---
+        function renderStats(data) {
+            const container = document.getElementById('statsGrid');
+
+            // Default stats if none provided
+            const stats = [
+                { number: data.year_founded || '2023', label: 'Year Founded' },
+                { number: data.levels_offered ? data.levels_offered.length : '4', label: 'Programmes' },
+                { number: data.extracurricular ? data.extracurricular.length : '3', label: 'Activities' },
+                { number: '100%', label: 'Dedicated to Excellence' }
+            ];
+
+            container.innerHTML = stats.map(stat => `
+                <div class="stat-item">
+                    <div class="number">${stat.number}</div>
+                    <div class="label">${stat.label}</div>
+                </div>
+            `).join('');
+        }
+
+        // --- MISSION, VISION, VALUES ---
+        function renderMissionVision(data) {
+            const container = document.getElementById('mvGrid');
+
+            let html = `
+                <div class="mv-card">
+                    <div class="icon"><i class="fas fa-bullseye"></i></div>
+                    <h3>Our Mission</h3>
+                    <p>${data.mission || 'To nurture young minds and prepare them for a future of excellence.'}</p>
+                </div>
+                <div class="mv-card">
+                    <div class="icon"><i class="fas fa-eye"></i></div>
+                    <h3>Our Vision</h3>
+                    <p>${data.vision || 'To be a beacon of excellence in education, raising children who lead with integrity.'}</p>
+                </div>
+            `;
+
+            container.innerHTML = html;
+
+            // Values
+            const valuesContainer = document.getElementById('valuesContainer');
+            const values = data.core_values && data.core_values.length > 0 ? data.core_values : [
+                'Excellence', 'Integrity', 'Discipline', 'Prayer'
+            ];
+
+            valuesContainer.innerHTML = `
+                <h3 style="font-size:1rem;font-weight:700;margin-top:16px;margin-bottom:12px;">Our Core Values</h3>
+                <div class="values-grid">
+                    ${values.map(value => `
+                        <div class="value-tag">${value}</div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // --- LEADERSHIP ---
+        function renderLeadership(data) {
+            const container = document.getElementById('leadershipGrid');
+
+            if (!container) return;
+
+            const leaders = data.leadership_team && data.leadership_team.length > 0 ? data.leadership_team : [];
+
+            if (leaders.length === 0) {
+                container.innerHTML = '<p style="color:var(--text-light);text-align:center;">Leadership team information coming soon.</p>';
+                return;
+            }
+
+            container.innerHTML = leaders.map(leader => `
+                <div class="leader-card">
+                    <div class="avatar">${leader.name ? leader.name.charAt(0) : '?'}</div>
+                    <h4>${leader.name || 'Staff Member'}</h4>
+                    <div class="title">${leader.title || 'Educator'}</div>
+                    <div class="bio">${leader.bio || ''}</div>
+                </div>
+            `).join('');
+        }
+
+        // --- LEVELS ---
+        function renderLevels(data) {
+            const container = document.getElementById('levelsGrid');
+
+            const levels = data.levels_offered && data.levels_offered.length > 0 ? data.levels_offered : [
+                { name: 'Crèche/Nursery', ages: '6 months – 3 years' },
+                { name: 'Primary', classes: 'Primary 1 – 5' },
+                { name: 'Junior Secondary', classes: 'JSS 1 – 3' },
+                { name: 'Senior Secondary', classes: 'SSS 1 – 3' }
+            ];
+
+            container.innerHTML = levels.map(level => `
+                <div class="level-card">
+                    <h4>${level.name}</h4>
+                    <p>${level.ages || level.classes || ''}</p>
+                </div>
+            `).join('');
+        }
+
+        // --- EXTRACURRICULAR ---
+        function renderExtracurricular(data) {
+            const container = document.getElementById('extraGrid');
+
+            const activities = data.extracurricular && data.extracurricular.length > 0 ? data.extracurricular : [
+                { name: 'Music Training', description: 'Professional music instruction.' },
+                { name: 'Football Training', description: 'Structured coaching for teamwork.' },
+                { name: 'Art Practicals', description: 'Creative art sessions.' }
+            ];
+
+            // Emoji mapping for common activities
+            const emojiMap = {
+                'music': '🎵',
+                'football': '⚽',
+                'art': '🎨',
+                'sports': '🏅',
+                'dance': '💃',
+                'drama': '🎭',
+                'chess': '♟️',
+                'coding': '💻',
+                'robotics': '🤖',
+                'science': '🔬',
+                'debate': '🗣️',
+                'reading': '📚',
+                'writing': '✍️',
+                'prayer': '🙏',
+                'community': '🤝',
+                'leadership': '👑'
+            };
+
+            function getEmoji(name) {
+                const lower = name.toLowerCase();
+                for (const [key, emoji] of Object.entries(emojiMap)) {
+                    if (lower.includes(key)) return emoji;
+                }
+                return '🌟';
+            }
+
+            container.innerHTML = activities.map(activity => `
+                <div class="extra-card">
+                    <span class="emoji">${getEmoji(activity.name)}</span>
+                    <h4>${activity.name}</h4>
+                    <p>${activity.description || ''}</p>
+                </div>
+            `).join('');
+        }
+
+        // --- WHY CHOOSE US ---
+        function renderWhyChooseUs(data) {
+            const container = document.getElementById('whyGrid');
+
+            const reasons = data.why_choose_us && data.why_choose_us.length > 0 ? data.why_choose_us : [
+                { title: 'Qualitative Education', description: 'Our curriculum is designed to build strong academic foundations.' },
+                { title: 'Affordable Education', description: 'We believe every child deserves access to excellent education.' },
+                { title: 'Proper Care', description: 'Our staff provide a warm, nurturing environment for every child.' },
+                { title: 'Discipline & Prayer', description: 'We build character through consistent discipline and a godly foundation.' }
+            ];
+
+            const icons = ['fa-graduation-cap', 'fa-coins', 'fa-heart', 'fa-shield-alt', 'fa-lightbulb', 'fa-handshake'];
+
+            container.innerHTML = reasons.map((reason, index) => `
+                <div class="why-card">
+                    <div class="icon"><i class="fas ${icons[index % icons.length]}"></i></div>
+                    <h4>${reason.title}</h4>
+                    <p>${reason.description || ''}</p>
+                </div>
+            `).join('');
+        }
+
+        // --- ACHIEVEMENTS ---
+        function renderAchievements(data) {
+            const container = document.getElementById('achievementsList');
+
+            const achievements = data.achievements && data.achievements.length > 0 ? data.achievements : [
+                '🏆 Best Private School in Ogun State 2024',
+                '📚 100% Pass Rate in National Exams 2023',
+                '🌟 Award for Excellence in Early Childhood Education'
+            ];
+
+            container.innerHTML = achievements.map(achievement => `
+                <div class="achievement-item">
+                    <i class="fas fa-award"></i>
+                    <span>${achievement}</span>
+                </div>
+            `).join('');
+        }
+
+        // --- MILESTONES ---
+        function renderMilestones(data) {
+            const container = document.getElementById('milestonesTimeline');
+
+            const milestones = data.milestones && data.milestones.length > 0 ? data.milestones : [
+                { year: '2023', event: 'School Founded' },
+                { year: '2024', event: 'First Graduating Class' }
+            ];
+
+            container.innerHTML = milestones.map(milestone => `
+                <div class="milestone-item">
+                    <span class="year">${milestone.year}</span>
+                    <span class="event">${milestone.event}</span>
+                </div>
+            `).join('');
+        }
+
+        // --- SOCIAL LINKS ---
+        function renderSocialLinks(data) {
+            const container = document.getElementById('socialLinks');
+
+            const social = data.social || {};
+
+            const platforms = [
+                { key: 'facebook', icon: 'fab fa-facebook-f', label: 'Facebook' },
+                { key: 'instagram', icon: 'fab fa-instagram', label: 'Instagram' },
+                { key: 'whatsapp', icon: 'fab fa-whatsapp', label: 'WhatsApp' },
+                { key: 'twitter', icon: 'fab fa-x-twitter', label: 'Twitter' },
+                { key: 'youtube', icon: 'fab fa-youtube', label: 'YouTube' }
+            ];
+
+            const links = platforms.filter(p => social[p.key]);
+
+            if (links.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+
+            container.innerHTML = links.map(p => `
+                <a href="${social[p.key]}" target="_blank" rel="noopener noreferrer" aria-label="${p.label}">
+                    <i class="${p.icon}"></i>
+                </a>
+            `).join('');
+        }
+
+        // --- FOOTER ---
+        function renderFooter(data) {
+            document.getElementById('footerBrand').textContent = data.school_name || 'School';
+            document.getElementById('footerAddress').textContent = data.address || '';
+
+            const year = new Date().getFullYear();
+            document.getElementById('footerCopyright').textContent = `© ${year} ${data.school_name || ''}. All rights reserved.`;
+        }
+
+        // --- CTA ---
+        function renderCTA(data) {
+            if (data.motto) {
+                document.getElementById('ctaHeading').textContent = data.motto;
+            }
+            // Keep default CTA if no custom text
+        }
+
+        // --- SECTION LABELS ---
+        function renderSectionLabels(data) {
+            // We'll use default labels; they can be customized via data if needed
+            // This is a placeholder for future customization
+        }
+
+        // ============================================
+        // MAIN: LOAD AND RENDER
+        // ============================================
+        async function init() {
+            try {
+                const data = await loadWebsiteData();
+
+                // Update CSS variables with school colors
+                if (data.primary_color) {
+                    document.documentElement.style.setProperty('--primary', data.primary_color);
+                }
+                if (data.secondary_color) {
+                    document.documentElement.style.setProperty('--secondary', data.secondary_color);
+                }
+                if (data.accent_color) {
+                    document.documentElement.style.setProperty('--accent', data.accent_color);
+                }
+
+                // Render all sections
+                renderNav(data);
+                renderHero(data);
+                renderStats(data);
+                renderMissionVision(data);
+                renderWhyChooseUs(data);
+                renderLevels(data);
+                renderExtracurricular(data);
+                renderAchievements(data);
+                renderMilestones(data);
+                renderSocialLinks(data);
+                renderFooter(data);
+                renderCTA(data);
+
+                // Show content, hide loading
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').classList.add('visible');
+
+            } catch (error) {
+                console.error('Error initializing website:', error);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error').classList.add('visible');
+            }
+        }
+
+        // ============================================
+        // START
+        // ============================================
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+
+</body>
+</html>
