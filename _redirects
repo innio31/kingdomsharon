@@ -1,2 +1,1 @@
-# Proxy API requests to acad.com.ng
 /api/* https://acad.com.ng/ksps/api/:splat 200
