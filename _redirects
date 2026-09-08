@@ -1,2 +1,2 @@
-# Redirect all traffic to acad.com.ng/ksps/ while preserving path
-/*  https://acad.com.ng/ksps/:splat  301
+# Proxy API requests to acad.com.ng
+/api/* https://acad.com.ng/ksps/api/:splat 200
