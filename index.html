@@ -987,29 +987,34 @@
         const API_URL = 'https://acad.com.ng/ksps/api/website-data.php';
 
         // ============================================
-        // FETCH DATA
-        // ============================================
-        async function loadWebsiteData() {
-            try {
-                const response = await fetch(API_URL);
-
-                if (!response.ok) {
-                    throw new Error('HTTP ' + response.status);
-                }
-
-                const data = await response.json();
-
-                // Check if there's an error from the API
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-
-                return data;
-            } catch (error) {
-                console.error('Error loading website data:', error);
-                throw error;
+// FETCH DATA WITH CORS SUPPORT
+// ============================================
+async function loadWebsiteData() {
+    try {
+        const response = await fetch(API_URL, {
+            method: 'GET',
+            mode: 'cors',
+            headers: {
+                'Accept': 'application/json',
             }
+        });
+
+        if (!response.ok) {
+            throw new Error('HTTP ' + response.status + ': ' + response.statusText);
         }
+
+        const data = await response.json();
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        return data;
+    } catch (error) {
+        console.error('Error loading website data:', error);
+        throw error;
+    }
+}
 
         // ============================================
         // RENDER FUNCTIONS
