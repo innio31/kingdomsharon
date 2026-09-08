@@ -1,2 +1,2 @@
-# Redirect all traffic to acad.com.ng/web/kingdomsharon/
-/* https://acad.com.ng/web/kingdomsharon/:splat 301
+# Proxy all traffic to acad.com.ng/web/kingdomsharon/
+/* https://acad.com.ng/web/kingdomsharon/:splat 200
