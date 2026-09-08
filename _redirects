@@ -1,1 +1,2 @@
-/api/* https://www.acad.com.ng/ksps/api/:splat 200
+# Redirect all traffic to acad.com.ng/web/kingdomsharon/
+/* https://acad.com.ng/web/kingdomsharon/:splat 301
