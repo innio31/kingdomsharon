@@ -1,5 +1,0 @@
-# Proxy all traffic (keeps URL)
-/* https://acad.com.ng/web/kingdomsharon/:splat 200
-
-# Proxy API requests
-/api/* https://acad.com.ng/ksps/api/:splat 200
